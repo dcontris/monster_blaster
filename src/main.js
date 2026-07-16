@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 import "./style.css";
+import { grantSkippedRoomModifiers, skippedRoomCount } from "./dev-start.js";
+import { updateSplitterMovement } from "./monster-movement.js";
 
 const WIDTH = 1024;
 const HEIGHT = 640;
@@ -51,28 +53,79 @@ class StartScene extends Phaser.Scene {
 
   create() {
     this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x130d23);
-    this.add.text(WIDTH / 2, 142, "MONSTER\nBLASTER", {
+    this.add.text(WIDTH / 2, 122, "MONSTER\nBLASTER", {
       fontFamily: "Courier New",
-      fontSize: "68px",
+      fontSize: "58px",
       fontStyle: "bold",
       color: "#f8c555",
       align: "center",
       stroke: "#511d54",
       strokeThickness: 8,
     }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, 300, "A PIXEL-FANTASY ENDLESS BLAST", {
+    this.add.text(WIDTH / 2, 252, "A PIXEL-FANTASY ENDLESS BLAST", {
       fontFamily: "Courier New",
       fontSize: "19px",
       color: "#e3b0eb",
     }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, 380, "Clear 10 combat rooms.\nSurvive milestone Onslaughts.\nBuild your Blaster.\nSurvive the Mega Boss.\nThen see how far you can get.", {
+    this.add.text(WIDTH / 2, 322, "Clear 10 combat rooms.\nSurvive milestone Onslaughts.\nBuild your Blaster.\nSurvive the Mega Boss.\nThen see how far you can get.", {
       fontFamily: "Courier New",
-      fontSize: "18px",
+      fontSize: "15px",
       color: "#f8efcf",
       align: "center",
-      lineSpacing: 10,
+      lineSpacing: 6,
     }).setOrigin(0.5);
-    const start = this.add.text(WIDTH / 2, 524, "CLICK TO START", {
+    this.add.text(WIDTH / 2, 414, "DEV: STARTING ROOM", {
+      fontFamily: "Courier New",
+      fontSize: "15px",
+      fontStyle: "bold",
+      color: "#b8a5d6",
+    }).setOrigin(0.5);
+
+    let selectedRoom = 1;
+    let selectedBoss = false;
+    const roomButtons = [];
+    let bossButton;
+    let bossLabel;
+    const updateSelection = () => {
+      roomButtons.forEach(({ room: buttonRoom, button, label }) => {
+        const selected = !selectedBoss && buttonRoom === selectedRoom;
+        button.setFillStyle(selected ? 0x593a78 : 0x35234f);
+        button.setStrokeStyle(2, selected ? 0xf8c555 : 0x8e6cab);
+        label.setColor(selected ? "#f8c555" : "#f8efcf");
+      });
+      bossButton.setFillStyle(selectedBoss ? 0x593a78 : 0x35234f);
+      bossButton.setStrokeStyle(2, selectedBoss ? 0xf8c555 : 0x8e6cab);
+      bossLabel.setColor(selectedBoss ? "#f8c555" : "#f8efcf");
+    };
+    const selectRoom = (room) => {
+      selectedRoom = room;
+      selectedBoss = false;
+      updateSelection();
+    };
+
+    for (let room = 1; room <= 10; room += 1) {
+      const column = (room - 1) % 5;
+      const row = Math.floor((room - 1) / 5);
+      const x = WIDTH / 2 - 152 + column * 76;
+      const y = 456 + row * 46;
+      const button = this.add.rectangle(x, y, 60, 34, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
+      const label = this.add.text(x, y, String(room), {
+        fontFamily: "Courier New", fontSize: "18px", fontStyle: "bold", color: "#f8efcf",
+      }).setOrigin(0.5);
+      button.on("pointerdown", () => selectRoom(room));
+      roomButtons.push({ room, button, label });
+    }
+    bossButton = this.add.rectangle(WIDTH / 2, 538, 150, 34, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
+    bossLabel = this.add.text(WIDTH / 2, 538, "MEGA BOSS", {
+      fontFamily: "Courier New", fontSize: "16px", fontStyle: "bold", color: "#f8efcf",
+    }).setOrigin(0.5);
+    bossButton.on("pointerdown", () => {
+      selectedBoss = true;
+      updateSelection();
+    });
+    selectRoom(selectedRoom);
+
+    const start = this.add.text(WIDTH / 2, 590, "CLICK TO START", {
       fontFamily: "Courier New",
       fontSize: "28px",
       fontStyle: "bold",
@@ -81,9 +134,9 @@ class StartScene extends Phaser.Scene {
       padding: { x: 18, y: 12 },
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.tweens.add({ targets: start, alpha: 0.35, duration: 700, yoyo: true, repeat: -1 });
-    this.input.once("pointerdown", () => {
+    start.on("pointerdown", () => {
       this.game.sfx.unlock();
-      this.scene.start("game");
+      this.scene.start("game", { startingRoom: selectedRoom, startingBoss: selectedBoss });
     });
   }
 }
@@ -91,6 +144,11 @@ class StartScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() {
     super("game");
+  }
+
+  init({ startingRoom = 1, startingBoss = false } = {}) {
+    this.startingRoom = Phaser.Math.Clamp(startingRoom, 1, 10);
+    this.startingBoss = startingBoss;
   }
 
   create() {
@@ -110,7 +168,7 @@ class GameScene extends Phaser.Scene {
     this.projectiles = [];
     this.enemyProjectiles = [];
     this.monsters = [];
-    this.room = 1;
+    this.room = this.startingRoom;
     this.endlessRoom = 0;
     this.isEndless = false;
     this.isBossFight = false;
@@ -122,12 +180,18 @@ class GameScene extends Phaser.Scene {
     this.upgradeOpen = false;
     this.runStartedAt = this.time.now;
     this.modifiers = { damage: 0, rate: 0, count: 0, speed: 0, pierce: 0 };
+    grantSkippedRoomModifiers(
+      this.modifiers,
+      skippedRoomCount(this.startingRoom, this.startingBoss),
+      () => Phaser.Utils.Array.GetRandom(Object.keys(this.modifiers)),
+    );
     this.lastShotAt = 0;
     this.cursorKeys = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys("W,A,S,D,SHIFT");
     this.input.on("pointerdown", () => this.game.sfx.unlock());
     this.createHud();
-    this.startCombatRoom();
+    if (this.startingBoss) this.startBoss();
+    else this.startCombatRoom();
   }
 
   createTextures() {
@@ -402,11 +466,13 @@ class GameScene extends Phaser.Scene {
   }
 
   updateSplitter(monster, time, delta) {
-    if (time >= monster.movementUntil) {
-      const baseAngle = Phaser.Math.Angle.Between(monster.sprite.x, monster.sprite.y, this.player.x, this.player.y);
-      monster.zigZagAngle = baseAngle + Phaser.Math.FloatBetween(-1.35, 1.35);
-      monster.movementUntil = time + Phaser.Math.Between(90, 190);
-    }
+    updateSplitterMovement(
+      monster,
+      this.player,
+      time,
+      () => Phaser.Math.FloatBetween(-1.35, 1.35),
+      () => Phaser.Math.Between(90, 190),
+    );
     this.moveAtAngle(monster, monster.zigZagAngle, delta, 2.25);
   }
 
