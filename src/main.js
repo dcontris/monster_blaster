@@ -189,7 +189,9 @@ class GameScene extends Phaser.Scene {
     this.createTextures();
     this.cameras.main.setBackgroundColor("#130d23");
     this.add.rectangle(WIDTH / 2, (ARENA.top + ARENA.bottom) / 2, ARENA.right - ARENA.left, ARENA.bottom - ARENA.top, 0x21143a)
-      .setStrokeStyle(3, 0x7a4b88);
+      .setStrokeStyle(3, 0x7a4b88)
+      .setDepth(-2);
+    this.warpEvents = [];
     this.drawFloor();
     this.player = this.add.sprite(WIDTH / 2, HEIGHT / 2, "player").setDepth(4);
     this.player.health = 100;
@@ -245,11 +247,103 @@ class GameScene extends Phaser.Scene {
     Object.entries(MONSTER_STATS).forEach(([key, stat]) => create(key, stat.color, stat.size * 2, 0x301d48));
   }
 
-  drawFloor() {
-    const floor = this.add.graphics().setDepth(-1);
-    floor.lineStyle(1, 0x4d3568, 0.38);
-    for (let x = ARENA.left + 16; x < ARENA.right; x += 32) floor.lineBetween(x, ARENA.top, x, ARENA.bottom);
-    for (let y = ARENA.top + 16; y < ARENA.bottom; y += 32) floor.lineBetween(ARENA.left, y, ARENA.right, y);
+  drawFloor(time = this.time.now) {
+    if (!this.spaceTimeGrid) this.spaceTimeGrid = this.add.graphics().setDepth(-1);
+    const floor = this.spaceTimeGrid;
+    const projectileWarps = [...(this.projectiles || []), ...(this.enemyProjectiles || [])].map((projectile) => ({
+      x: projectile.sprite.x,
+      y: projectile.sprite.y,
+      vx: projectile.vx,
+      vy: projectile.vy,
+      radius: 78,
+      strength: 13,
+    }));
+    this.warpEvents = this.warpEvents.filter((event) => time - event.startedAt < event.duration);
+    floor.clear();
+
+    const drawGridLine = (vertical) => {
+      floor.beginPath();
+      const fixed = vertical ? ARENA.left + 16 : ARENA.top + 16;
+      const limit = vertical ? ARENA.right : ARENA.bottom;
+      for (let line = fixed; line < limit; line += 32) {
+        for (let progress = vertical ? ARENA.top : ARENA.left; progress <= (vertical ? ARENA.bottom : ARENA.right); progress += 12) {
+          const point = this.warpGridPoint(vertical ? line : progress, vertical ? progress : line, projectileWarps, time);
+          if (progress === (vertical ? ARENA.top : ARENA.left)) floor.moveTo(point.x, point.y);
+          else floor.lineTo(point.x, point.y);
+        }
+        floor.strokePath();
+        floor.beginPath();
+      }
+    };
+
+    floor.lineStyle(1, 0x765a9c, 0.5);
+    drawGridLine(true);
+    floor.lineStyle(1, 0x5a4380, 0.44);
+    drawGridLine(false);
+    this.drawDeathWarps(floor, time);
+  }
+
+  warpGridPoint(x, y, projectileWarps, time) {
+    let warpedX = x;
+    let warpedY = y;
+    const warpPoint = (source, mode = "projectile") => {
+      const dx = x - source.x;
+      const dy = y - source.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      if (distance >= source.radius) return;
+      const falloff = ((source.radius - distance) / source.radius) ** 2;
+      const pull = source.strength * falloff;
+      warpedX -= (dx / distance) * pull;
+      warpedY -= (dy / distance) * pull;
+      if (mode === "projectile") {
+        const speed = Math.hypot(source.vx, source.vy) || 1;
+        const normalX = -source.vy / speed;
+        const normalY = source.vx / speed;
+        const trail = Phaser.Math.Clamp((source.radius * 0.45 - (dx * source.vx + dy * source.vy) / speed) / source.radius, 0, 1);
+        const side = Math.sign(dx * normalX + dy * normalY);
+        warpedX -= normalX * side * pull * trail * 0.8;
+        warpedY -= normalY * side * pull * trail * 0.8;
+      }
+    };
+
+    projectileWarps.forEach((source) => warpPoint(source));
+    this.warpEvents.forEach((event) => {
+      const age = (time - event.startedAt) / event.duration;
+      const dx = x - event.x;
+      const dy = y - event.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      if (age < 0.3) {
+        warpPoint({ ...event, radius: 150, strength: event.strength * (1 - age / 0.3) * 3.4 }, "singularity");
+        return;
+      }
+      const ringRadius = 24 + (age - 0.3) * 430;
+      const ringWidth = 52;
+      const ringForce = Math.max(0, 1 - Math.abs(distance - ringRadius) / ringWidth) ** 2 * event.strength * (1 - age) * 2.5;
+      warpedX += (dx / distance) * ringForce;
+      warpedY += (dy / distance) * ringForce;
+      warpedX += (-dy / distance) * ringForce * 0.42;
+      warpedY += (dx / distance) * ringForce * 0.42;
+    });
+    return { x: warpedX, y: warpedY };
+  }
+
+  drawDeathWarps(floor, time) {
+    this.warpEvents.forEach((event) => {
+      const age = (time - event.startedAt) / event.duration;
+      if (age < 0.3) {
+        const radius = 10 + age * 90;
+        floor.fillStyle(0x08050f, (1 - age / 0.3) * 0.78);
+        floor.fillCircle(event.x, event.y, radius);
+        floor.lineStyle(2, 0xb984de, (1 - age / 0.3) * 0.8);
+        floor.strokeCircle(event.x, event.y, radius + 6);
+        return;
+      }
+      const radius = 24 + (age - 0.3) * 430;
+      floor.lineStyle(2, 0xe3b0eb, (1 - age) * 0.8);
+      floor.strokeCircle(event.x, event.y, radius);
+      floor.lineStyle(1, 0x8f6fca, (1 - age) * 0.6);
+      floor.strokeCircle(event.x, event.y, Math.max(0, radius - 13));
+    });
   }
 
   createHud() {
@@ -402,6 +496,7 @@ class GameScene extends Phaser.Scene {
     if (this.upgradeOpen) return;
     this.updatePlayer(time, delta);
     this.updateBlaster(time);
+    this.drawFloor(time);
     this.updateProjectiles(delta);
     this.updateMonsters(time, delta);
     this.updateEnemyProjectiles(delta);
@@ -764,6 +859,13 @@ class GameScene extends Phaser.Scene {
     monster.dead = true;
     const x = monster.sprite.x;
     const y = monster.sprite.y;
+    this.warpEvents.push({
+      x,
+      y,
+      startedAt: this.time.now,
+      duration: monster.type === "boss" ? 1450 : 760,
+      strength: monster.type === "boss" ? 42 : Math.max(10, monster.size * 0.9),
+    });
     this.tweens.add({ targets: monster.sprite, alpha: 0, scale: 2, duration: 120, onComplete: () => monster.sprite.destroy() });
     this.game.sfx.play(monster.type === "boss" ? 70 : 180, monster.type === "boss" ? 0.45 : 0.08, "sawtooth", monster.type === "boss" ? 0.1 : 0.04);
     if (monster.type === "splitter") {
