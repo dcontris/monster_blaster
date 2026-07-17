@@ -1,12 +1,12 @@
 import Phaser from "phaser";
 import "./style.css";
 import { grantSkippedRoomModifiers, skippedRoomCount } from "./dev-start.js";
+import { hardModeScale, scaledEnemyCount } from "./hard-mode.js";
 import { updateSplitterMovement } from "./monster-movement.js";
 
 const WIDTH = 1024;
 const HEIGHT = 640;
 const ARENA = { left: 38, right: WIDTH - 38, top: 76, bottom: HEIGHT - 36 };
-
 const MONSTER_STATS = {
   chaser: { health: 26, speed: 92, size: 15, color: 0x78c850, damage: 11 },
   ranged: { health: 36, speed: 65, size: 16, color: 0x6aa8dd, damage: 9 },
@@ -74,7 +74,7 @@ class StartScene extends Phaser.Scene {
       align: "center",
       lineSpacing: 6,
     }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, 414, "DEV: STARTING ROOM", {
+    this.add.text(WIDTH / 2, 398, "DEV: STARTING ROOM", {
       fontFamily: "Courier New",
       fontSize: "15px",
       fontStyle: "bold",
@@ -107,7 +107,7 @@ class StartScene extends Phaser.Scene {
       const column = (room - 1) % 5;
       const row = Math.floor((room - 1) / 5);
       const x = WIDTH / 2 - 152 + column * 76;
-      const y = 456 + row * 46;
+      const y = 436 + row * 40;
       const button = this.add.rectangle(x, y, 60, 34, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
       const label = this.add.text(x, y, String(room), {
         fontFamily: "Courier New", fontSize: "18px", fontStyle: "bold", color: "#f8efcf",
@@ -115,8 +115,8 @@ class StartScene extends Phaser.Scene {
       button.on("pointerdown", () => selectRoom(room));
       roomButtons.push({ room, button, label });
     }
-    bossButton = this.add.rectangle(WIDTH / 2, 538, 150, 34, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
-    bossLabel = this.add.text(WIDTH / 2, 538, "MEGA BOSS", {
+    bossButton = this.add.rectangle(WIDTH / 2, 516, 150, 30, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
+    bossLabel = this.add.text(WIDTH / 2, 516, "MEGA BOSS", {
       fontFamily: "Courier New", fontSize: "16px", fontStyle: "bold", color: "#f8efcf",
     }).setOrigin(0.5);
     bossButton.on("pointerdown", () => {
@@ -125,18 +125,50 @@ class StartScene extends Phaser.Scene {
     });
     selectRoom(selectedRoom);
 
-    const start = this.add.text(WIDTH / 2, 590, "CLICK TO START", {
+    this.add.text(WIDTH / 2, 548, "RUN CONFIGURATION", {
       fontFamily: "Courier New",
-      fontSize: "28px",
+      fontSize: "13px",
+      fontStyle: "bold",
+      color: "#b8a5d6",
+    }).setOrigin(0.5);
+    let selectedHardMode = false;
+    const modeButtons = [];
+    const updateModeSelection = () => {
+      modeButtons.forEach(({ hardMode, button, label }) => {
+        const selected = hardMode === selectedHardMode;
+        button.setFillStyle(selected ? 0x593a78 : 0x35234f);
+        button.setStrokeStyle(2, selected ? 0xf8c555 : 0x8e6cab);
+        label.setColor(selected ? "#f8c555" : "#f8efcf");
+      });
+    };
+    [
+      { hardMode: false, label: "BASELINE", x: WIDTH / 2 - 88 },
+      { hardMode: true, label: "HARD MODE", x: WIDTH / 2 + 88 },
+    ].forEach(({ hardMode, label: text, x }) => {
+      const button = this.add.rectangle(x, 574, 156, 30, 0x35234f).setStrokeStyle(2, 0x8e6cab).setInteractive({ useHandCursor: true });
+      const label = this.add.text(x, 574, text, {
+        fontFamily: "Courier New", fontSize: "15px", fontStyle: "bold", color: "#f8efcf",
+      }).setOrigin(0.5);
+      button.on("pointerdown", () => {
+        selectedHardMode = hardMode;
+        updateModeSelection();
+      });
+      modeButtons.push({ hardMode, button, label });
+    });
+    updateModeSelection();
+
+    const start = this.add.text(WIDTH / 2, 618, "CLICK TO START", {
+      fontFamily: "Courier New",
+      fontSize: "21px",
       fontStyle: "bold",
       color: "#78c850",
       backgroundColor: "#25153c",
-      padding: { x: 18, y: 12 },
+      padding: { x: 14, y: 7 },
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.tweens.add({ targets: start, alpha: 0.35, duration: 700, yoyo: true, repeat: -1 });
     start.on("pointerdown", () => {
       this.game.sfx.unlock();
-      this.scene.start("game", { startingRoom: selectedRoom, startingBoss: selectedBoss });
+      this.scene.start("game", { startingRoom: selectedRoom, startingBoss: selectedBoss, hardMode: selectedHardMode });
     });
   }
 }
@@ -146,9 +178,10 @@ class GameScene extends Phaser.Scene {
     super("game");
   }
 
-  init({ startingRoom = 1, startingBoss = false } = {}) {
+  init({ startingRoom = 1, startingBoss = false, hardMode = false } = {}) {
     this.startingRoom = Phaser.Math.Clamp(startingRoom, 1, 10);
     this.startingBoss = startingBoss;
+    this.hardMode = hardMode;
   }
 
   create() {
@@ -243,7 +276,7 @@ class GameScene extends Phaser.Scene {
     const scale = this.isEndless ? this.endlessRoom : this.room;
     const densityBonus = this.isEndless ? Math.floor(scale * 0.7)
       : scale >= 9 ? 4 : scale >= 6 ? 3 : scale >= 3 ? 2 : 0;
-    const count = 3 + this.wave + Math.floor(scale * 1.2) + densityBonus;
+    const count = this.scaledEnemyCount(3 + this.wave + Math.floor(scale * 1.2) + densityBonus);
     for (let i = 0; i < count; i += 1) {
       this.spawnMonster(Phaser.Utils.Array.GetRandom(this.unlockedMonsterTypes(scale)), scale);
     }
@@ -262,6 +295,22 @@ class GameScene extends Phaser.Scene {
     return types;
   }
 
+  scaledEnemyCount(count) {
+    return scaledEnemyCount(count, this.hardMode);
+  }
+
+  enemyHealthScale() {
+    return hardModeScale("health", this.hardMode);
+  }
+
+  enemyDamageScale() {
+    return hardModeScale("damage", this.hardMode);
+  }
+
+  enemySpeedScale() {
+    return hardModeScale("speed", this.hardMode);
+  }
+
   spawnOnslaught() {
     this.onslaughtPending = false;
     this.onslaughtTriggered = true;
@@ -272,7 +321,7 @@ class GameScene extends Phaser.Scene {
     };
     const composition = compositions[this.room];
     Object.entries(composition).forEach(([type, count]) => {
-      for (let i = 0; i < count; i += 1) this.spawnMonster(type, this.room);
+      for (let i = 0; i < this.scaledEnemyCount(count); i += 1) this.spawnMonster(type, this.room);
     });
     this.game.sfx.play(95, 0.45, "sawtooth", 0.11);
     this.showMessage("ONSLAUGHT!", "#e05b7d");
@@ -288,13 +337,16 @@ class GameScene extends Phaser.Scene {
             : { x: Phaser.Math.Between(ARENA.left, ARENA.right), y: ARENA.bottom - 12 }
       : { x, y };
     const sprite = this.add.sprite(position.x, position.y, type).setDepth(3);
-    const endlessScale = this.isEndless ? 1 + (scale * 0.13) : 1 + (scale * 0.06);
+    const statScale = this.enemyHealthScale();
+    const damageScale = this.enemyDamageScale();
+    const movementScale = this.enemySpeedScale();
+    const endlessScale = (this.isEndless ? 1 + (scale * 0.13) : 1 + (scale * 0.06)) * statScale;
     const speedScale = this.isEndless
       ? 1 + Math.min(0.8, scale * 0.08)
       : 1 + Math.min(0.4, Math.max(0, scale - 2) * 0.05);
     this.monsters.push({
       type, sprite, health: stat.health * endlessScale, maxHealth: stat.health * endlessScale,
-      speed: stat.speed * speedScale, damage: stat.damage * (1 + scale * 0.05),
+      speed: stat.speed * speedScale * movementScale, damage: stat.damage * (1 + scale * 0.05) * damageScale,
       size: stat.size, scale, shotAt: this.time.now + Phaser.Math.Between(400, 1200),
       orbitDirection: Phaser.Math.Between(0, 1) ? 1 : -1,
       movementUntil: this.time.now + Phaser.Math.Between(350, 850),
@@ -307,7 +359,8 @@ class GameScene extends Phaser.Scene {
     this.showMessage("THE MEGA BOSS AWAKENS", "#e05b7d");
     const sprite = this.add.sprite(WIDTH / 2, ARENA.top + 86, "boss").setDepth(3);
     const boss = {
-      type: "boss", sprite, health: 1500, maxHealth: 1500, speed: 50, size: 34, damage: 23,
+      type: "boss", sprite, health: 1500 * this.enemyHealthScale(), maxHealth: 1500 * this.enemyHealthScale(),
+      speed: 50 * this.enemySpeedScale(), size: 34, damage: 23 * this.enemyDamageScale(),
       phase: 1, shotAt: this.time.now + 1000, summonAt: this.time.now + 3200, dead: false,
     };
     this.monsters.push(boss);
@@ -553,13 +606,13 @@ class GameScene extends Phaser.Scene {
     }
     this.updateBossMovement(boss, time, delta);
     if (time >= boss.shotAt) {
-      const shots = boss.phase + 2;
+      const shots = this.scaledEnemyCount(boss.phase + 2);
       for (let i = 0; i < shots; i += 1) this.fireEnemyProjectile(boss, (220 + boss.phase * 35) * 1.25, (i - (shots - 1) / 2) * 0.16);
-      if (boss.phase >= 2) this.fireRadial(boss, boss.phase === 3 ? 12 : 8, 190 * 1.25);
+      if (boss.phase >= 2) this.fireRadial(boss, this.scaledEnemyCount(boss.phase === 3 ? 12 : 8), 190 * 1.25);
       boss.shotAt = time + 1450 - boss.phase * 180;
     }
     if (time >= boss.summonAt) {
-      for (let i = 0; i < boss.phase; i += 1) this.spawnMonster("chaser", 8 + boss.phase, boss.sprite.x + Phaser.Math.Between(-70, 70), boss.sprite.y + 42);
+      for (let i = 0; i < this.scaledEnemyCount(boss.phase); i += 1) this.spawnMonster("chaser", 8 + boss.phase, boss.sprite.x + Phaser.Math.Between(-70, 70), boss.sprite.y + 42);
       boss.summonAt = time + 4300 - boss.phase * 300;
     }
   }
@@ -614,7 +667,9 @@ class GameScene extends Phaser.Scene {
   fireEnemyProjectile(source, speed, angleOffset = 0) {
     const angle = Phaser.Math.Angle.Between(source.sprite.x, source.sprite.y, this.player.x, this.player.y) + angleOffset;
     const sprite = this.add.sprite(source.sprite.x, source.sprite.y, "enemyBullet").setDepth(2);
-    this.enemyProjectiles.push({ sprite, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, damage: source.type === "boss" ? 12 + source.phase * 3 : source.damage });
+    const projectileSpeed = speed * this.enemySpeedScale();
+    const damage = source.type === "boss" ? (12 + source.phase * 3) * this.enemyDamageScale() : source.damage;
+    this.enemyProjectiles.push({ sprite, vx: Math.cos(angle) * projectileSpeed, vy: Math.sin(angle) * projectileSpeed, damage });
   }
 
   normalProjectileSpeed(monster) {
@@ -626,18 +681,25 @@ class GameScene extends Phaser.Scene {
 
   fireRotatingRing(source, count, speed) {
     source.ringAngle = (source.ringAngle || 0) + Math.PI / 7;
+    const projectileSpeed = speed * this.enemySpeedScale();
     for (let i = 0; i < count; i += 1) {
       const angle = source.ringAngle + (Math.PI * 2 * i) / count;
       const sprite = this.add.sprite(source.sprite.x, source.sprite.y, "enemyBullet").setDepth(2);
-      this.enemyProjectiles.push({ sprite, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, damage: source.damage });
+      this.enemyProjectiles.push({ sprite, vx: Math.cos(angle) * projectileSpeed, vy: Math.sin(angle) * projectileSpeed, damage: source.damage });
     }
   }
 
   fireRadial(source, count, speed = 190) {
+    const projectileSpeed = speed * this.enemySpeedScale();
     for (let i = 0; i < count; i += 1) {
       const angle = (Math.PI * 2 * i) / count;
       const sprite = this.add.sprite(source.sprite.x, source.sprite.y, "enemyBullet").setDepth(2);
-      this.enemyProjectiles.push({ sprite, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, damage: 11 + source.phase * 2 });
+      this.enemyProjectiles.push({
+        sprite,
+        vx: Math.cos(angle) * projectileSpeed,
+        vy: Math.sin(angle) * projectileSpeed,
+        damage: (11 + source.phase * 2) * this.enemyDamageScale(),
+      });
     }
   }
 
@@ -785,7 +847,8 @@ class GameScene extends Phaser.Scene {
   }
 
   updateHud() {
-    const title = this.isBossFight ? "MEGA BOSS" : this.isEndless ? `ENDLESS ${this.endlessRoom}` : `ROOM ${this.room}`;
+    const area = this.isBossFight ? "MEGA BOSS" : this.isEndless ? `ENDLESS ${this.endlessRoom}` : `ROOM ${this.room}`;
+    const title = this.hardMode ? `HARD MODE: ${area}` : area;
     this.hud.title.setText(title);
     this.hud.health.setText(`HP ${Math.ceil(this.player.health)} / ${this.player.maxHealth}`);
     this.hud.dash.setText(this.time.now >= this.player.dashReadyAt ? "DASH READY" : "DASH ...");
@@ -808,6 +871,7 @@ class GameScene extends Phaser.Scene {
       bossDefeated: this.isEndless,
       elapsed: Math.floor((this.time.now - this.runStartedAt) / 1000),
       modifiers: this.modifiers,
+      hardMode: this.hardMode,
     });
   }
 }
@@ -829,7 +893,7 @@ class SummaryScene extends Phaser.Scene {
     this.add.text(WIDTH / 2, 100, "RUN ENDED", {
       fontFamily: "Courier New", fontSize: "50px", fontStyle: "bold", color: "#e05b7d",
     }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, 205, `ROOM REACHED: ${this.run.room}\nMEGA BOSS: ${this.run.bossDefeated ? "DEFEATED" : "NOT REACHED"}\nTIME: ${time}`, {
+    this.add.text(WIDTH / 2, 205, `MODE: ${this.run.hardMode ? "HARD" : "BASELINE"}\nROOM REACHED: ${this.run.room}\nMEGA BOSS: ${this.run.bossDefeated ? "DEFEATED" : "NOT REACHED"}\nTIME: ${time}`, {
       fontFamily: "Courier New", fontSize: "21px", color: "#f8efcf", align: "center", lineSpacing: 11,
     }).setOrigin(0.5);
     this.add.text(WIDTH / 2, 362, `BLASTER BUILD\n${modifiers}`, {
@@ -838,7 +902,7 @@ class SummaryScene extends Phaser.Scene {
     const restart = this.add.text(WIDTH / 2, 544, "CLICK TO BLAST AGAIN", {
       fontFamily: "Courier New", fontSize: "25px", fontStyle: "bold", color: "#78c850", backgroundColor: "#25153c", padding: { x: 16, y: 10 },
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    restart.on("pointerdown", () => this.scene.start("game"));
+    restart.on("pointerdown", () => this.scene.start("game", { hardMode: this.run.hardMode }));
   }
 }
 

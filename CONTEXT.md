@@ -12,6 +12,10 @@ _Avoid_: Session, playthrough
 The default combat challenge of a Run, determined by its room progression and enemy tuning.
 _Avoid_: Difficulty mode, settings
 
+**Hard mode**:
+An optional, brutal, swarm-focused Run configuration selected before a Run. It preserves player capabilities and Blaster modifier values while increasing Combat pressure throughout the Run, including the Mega Boss and Endless phase.
+_Avoid_: Baseline difficulty
+
 **Combat pressure**:
 The challenge created by the quantity, mixture, pacing, and behavior of monsters in a combat room. Ordinary waves use fully random mixtures of all archetypes unlocked for their room, without per-wave caps.
 _Avoid_: Damage spike, stat inflation
@@ -45,7 +49,7 @@ The event where the player's health reaches zero and the current Run ends.
 _Avoid_: Death, game over
 
 **Run summary**:
-The Defeat screen record of the room reached, Mega Boss status, elapsed time, and selected Blaster modifiers.
+The Defeat screen record of the selected Run configuration, room reached, Mega Boss status, elapsed time, and selected Blaster modifiers.
 _Avoid_: Scoreboard, results
 
 **Hit protection**:
