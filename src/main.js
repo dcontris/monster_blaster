@@ -201,6 +201,7 @@ class GameScene extends Phaser.Scene {
     this.projectiles = [];
     this.enemyProjectiles = [];
     this.monsters = [];
+    this.pendingSpawnCount = 0;
     this.room = this.startingRoom;
     this.endlessRoom = 0;
     this.isEndless = false;
@@ -336,6 +337,11 @@ class GameScene extends Phaser.Scene {
           : side === 2 ? { x: Phaser.Math.Between(ARENA.left, ARENA.right), y: ARENA.top + 12 }
             : { x: Phaser.Math.Between(ARENA.left, ARENA.right), y: ARENA.bottom - 12 }
       : { x, y };
+    this.showSpawnIndicator(type, position, stat.size, () => this.createMonster(type, scale, position));
+  }
+
+  createMonster(type, scale, position) {
+    const stat = MONSTER_STATS[type];
     const sprite = this.add.sprite(position.x, position.y, type).setDepth(3);
     const statScale = this.enemyHealthScale();
     const damageScale = this.enemyDamageScale();
@@ -354,17 +360,42 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  showSpawnIndicator(type, position, size, onComplete) {
+    const stat = type === "boss" ? { color: 0x8e3f71, size } : MONSTER_STATS[type];
+    const marker = this.add.sprite(position.x, position.y, type).setDepth(2).setAlpha(0.32).setScale(1.45);
+    const ring = this.add.circle(position.x, position.y, size + 11, stat.color, 0.1)
+      .setStrokeStyle(2, stat.color, 0.85)
+      .setDepth(2);
+    this.pendingSpawnCount += 1;
+    this.tweens.add({
+      targets: [marker, ring],
+      alpha: 0.9,
+      scale: 1.12,
+      duration: 225,
+      yoyo: true,
+    });
+    this.time.delayedCall(450, () => {
+      marker.destroy();
+      ring.destroy();
+      this.pendingSpawnCount -= 1;
+      onComplete();
+    });
+  }
+
   startBoss() {
     this.isBossFight = true;
     this.showMessage("THE MEGA BOSS AWAKENS", "#e05b7d");
-    const sprite = this.add.sprite(WIDTH / 2, ARENA.top + 86, "boss").setDepth(3);
-    const boss = {
-      type: "boss", sprite, health: 1500 * this.enemyHealthScale(), maxHealth: 1500 * this.enemyHealthScale(),
-      speed: 50 * this.enemySpeedScale(), size: 34, damage: 23 * this.enemyDamageScale(),
-      phase: 1, shotAt: this.time.now + 1000, summonAt: this.time.now + 3200, dead: false,
-    };
-    this.monsters.push(boss);
-    this.game.sfx.play(82, 0.45, "sawtooth", 0.1);
+    const position = { x: WIDTH / 2, y: ARENA.top + 86 };
+    this.showSpawnIndicator("boss", position, 34, () => {
+      const sprite = this.add.sprite(position.x, position.y, "boss").setDepth(3);
+      const boss = {
+        type: "boss", sprite, health: 1500 * this.enemyHealthScale(), maxHealth: 1500 * this.enemyHealthScale(),
+        speed: 50 * this.enemySpeedScale(), size: 34, damage: 23 * this.enemyDamageScale(),
+        phase: 1, shotAt: this.time.now + 1000, summonAt: this.time.now + 3200, dead: false,
+      };
+      this.monsters.push(boss);
+      this.game.sfx.play(82, 0.45, "sawtooth", 0.1);
+    });
   }
 
   update(time, delta) {
@@ -767,7 +798,7 @@ class GameScene extends Phaser.Scene {
   }
 
   updateRoomState(time) {
-    if (this.isBossFight || this.upgradeOpen || this.monsters.length > 0) return;
+    if (this.isBossFight || this.upgradeOpen || this.monsters.length > 0 || this.pendingSpawnCount > 0) return;
     if (this.wave === 0 && time >= this.nextWaveAt) {
       this.spawnWave();
       return;
