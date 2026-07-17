@@ -74,7 +74,7 @@ class StartScene extends Phaser.Scene {
       align: "center",
       lineSpacing: 6,
     }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, 398, "DEV: STARTING ROOM", {
+    this.add.text(WIDTH / 2, 398, "STARTING ROOM", {
       fontFamily: "Courier New",
       fontSize: "15px",
       fontStyle: "bold",
@@ -899,10 +899,10 @@ class SummaryScene extends Phaser.Scene {
     this.add.text(WIDTH / 2, 362, `BLASTER BUILD\n${modifiers}`, {
       fontFamily: "Courier New", fontSize: "16px", color: "#b8a5d6", align: "center", lineSpacing: 7,
     }).setOrigin(0.5);
-    const restart = this.add.text(WIDTH / 2, 544, "CLICK TO BLAST AGAIN", {
+    const restart = this.add.text(WIDTH / 2, 544, "CHOOSE A NEW RUN", {
       fontFamily: "Courier New", fontSize: "25px", fontStyle: "bold", color: "#78c850", backgroundColor: "#25153c", padding: { x: 16, y: 10 },
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    restart.on("pointerdown", () => this.scene.start("game", { hardMode: this.run.hardMode }));
+    restart.on("pointerdown", () => this.scene.start("start"));
   }
 }
 
