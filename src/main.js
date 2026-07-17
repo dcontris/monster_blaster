@@ -1,21 +1,23 @@
 import Phaser from "phaser";
 import "./style.css";
+import gameplayMusicUrl from "../assets/sound/music/track1.mp3";
 import { grantSkippedRoomModifiers, skippedRoomCount } from "./dev-start.js";
 import { hardModeScale, scaledEnemyCount } from "./hard-mode.js";
 import { updateSplitterMovement } from "./monster-movement.js";
+import { createDeveloperControls, loadTuning } from "./dev-tuning.js";
 
 const WIDTH = 1024;
 const HEIGHT = 640;
 const ARENA = { left: 38, right: WIDTH - 38, top: 76, bottom: HEIGHT - 36 };
-const MONSTER_STATS = {
-  chaser: { health: 26, speed: 92, size: 15, color: 0x78c850, damage: 11 },
-  ranged: { health: 36, speed: 65, size: 16, color: 0x6aa8dd, damage: 9 },
-  tank: { health: 105, speed: 42, size: 25, color: 0xbf6f74, damage: 18 },
-  splitter: { health: 44, speed: 75, size: 18, color: 0xc780d7, damage: 12 },
-  mini: { health: 12, speed: 125, size: 9, color: 0xe3b0eb, damage: 7 },
-  orbiter: { health: 52, speed: 72, size: 18, color: 0x68d7c1, damage: 9 },
-  ambusher: { health: 38, speed: 88, size: 14, color: 0xf2a65a, damage: 14 },
-  summoner: { health: 68, speed: 54, size: 20, color: 0xf0d06c, damage: 10 },
+const MONSTER_VISUALS = {
+  chaser: { size: 15, color: 0x78c850 },
+  ranged: { size: 16, color: 0x6aa8dd },
+  tank: { size: 25, color: 0xbf6f74 },
+  splitter: { size: 18, color: 0xc780d7 },
+  mini: { size: 9, color: 0xe3b0eb },
+  orbiter: { size: 18, color: 0x68d7c1 },
+  ambusher: { size: 14, color: 0xf2a65a },
+  summoner: { size: 20, color: 0xf0d06c },
 };
 
 class Sfx {
@@ -49,6 +51,10 @@ class Sfx {
 class StartScene extends Phaser.Scene {
   constructor() {
     super("start");
+  }
+
+  preload() {
+    this.load.audio("gameplayMusic", gameplayMusicUrl);
   }
 
   create() {
@@ -186,6 +192,12 @@ class GameScene extends Phaser.Scene {
 
   create() {
     this.game.sfx.unlock();
+    this.music = this.sound.add("gameplayMusic", { loop: true, volume: 0.3 });
+    this.music.play();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.music.destroy();
+      this.game.devControls.setGameActive(false);
+    });
     this.createTextures();
     this.cameras.main.setBackgroundColor("#130d23");
     this.add.rectangle(WIDTH / 2, (ARENA.top + ARENA.bottom) / 2, ARENA.right - ARENA.left, ARENA.bottom - ARENA.top, 0x21143a)
@@ -194,8 +206,9 @@ class GameScene extends Phaser.Scene {
     this.warpEvents = [];
     this.drawFloor();
     this.player = this.add.sprite(WIDTH / 2, HEIGHT / 2, "player").setDepth(4);
-    this.player.health = 100;
-    this.player.maxHealth = 100;
+    this.tuning = this.game.tuning;
+    this.player.health = this.tuning.playerHealth;
+    this.player.maxHealth = this.tuning.playerHealth;
     this.player.invulnerableUntil = 0;
     this.player.dashUntil = 0;
     this.player.dashReadyAt = 0;
@@ -214,6 +227,7 @@ class GameScene extends Phaser.Scene {
     this.onslaughtPending = false;
     this.onslaughtTriggered = false;
     this.upgradeOpen = false;
+    this.isTuningPaused = false;
     this.runStartedAt = this.time.now;
     this.modifiers = { damage: 0, rate: 0, count: 0, speed: 0, pierce: 0 };
     grantSkippedRoomModifiers(
@@ -224,10 +238,20 @@ class GameScene extends Phaser.Scene {
     this.lastShotAt = 0;
     this.cursorKeys = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys("W,A,S,D,SHIFT");
+    this.input.keyboard.on("keydown-P", () => this.togglePaused());
     this.input.on("pointerdown", () => this.game.sfx.unlock());
+    this.game.devControls.setGameActive(true);
+    this.game.devControls.setPaused(false);
     this.createHud();
     if (this.startingBoss) this.startBoss();
     else this.startCombatRoom();
+  }
+
+  togglePaused() {
+    this.isTuningPaused = !this.isTuningPaused;
+    this.game.devControls.setPaused(this.isTuningPaused);
+    if (this.isTuningPaused) this.scene.pause();
+    else this.scene.resume();
   }
 
   createTextures() {
@@ -244,7 +268,7 @@ class GameScene extends Phaser.Scene {
     create("bullet", 0xfff3b4, 8, 0xf8c555);
     create("enemyBullet", 0xe05b7d, 9, 0xffc1cf);
     create("boss", 0x8e3f71, 68, 0xf8c555);
-    Object.entries(MONSTER_STATS).forEach(([key, stat]) => create(key, stat.color, stat.size * 2, 0x301d48));
+    Object.entries(MONSTER_VISUALS).forEach(([key, stat]) => create(key, stat.color, stat.size * 2, 0x301d48));
   }
 
   drawFloor(time = this.time.now) {
@@ -358,8 +382,8 @@ class GameScene extends Phaser.Scene {
   startCombatRoom() {
     this.isBossFight = false;
     this.wave = 0;
-    this.wavesInRoom = this.isEndless ? 3 + Math.floor(this.endlessRoom / 3) : 2 + Math.floor(this.room / 3);
-    this.nextWaveAt = this.time.now + 850;
+    this.wavesInRoom = this.isEndless ? this.tuning.wavesPerRoom + 1 + Math.floor(this.endlessRoom / 3) : this.tuning.wavesPerRoom + Math.floor(this.room / 3);
+    this.nextWaveAt = this.time.now + this.tuning.waveStartDelay;
     this.onslaughtPending = false;
     this.onslaughtTriggered = false;
     this.showMessage(this.isEndless ? `ENDLESS ROOM ${this.endlessRoom}` : `COMBAT ROOM ${this.room}`, "#78c850");
@@ -371,7 +395,7 @@ class GameScene extends Phaser.Scene {
     const scale = this.isEndless ? this.endlessRoom : this.room;
     const densityBonus = this.isEndless ? Math.floor(scale * 0.7)
       : scale >= 9 ? 4 : scale >= 6 ? 3 : scale >= 3 ? 2 : 0;
-    const count = this.scaledEnemyCount(3 + this.wave + Math.floor(scale * 1.2) + densityBonus);
+    const count = this.scaledEnemyCount(this.tuning.waveBaseCount + this.wave + Math.floor(scale * this.tuning.waveScaleFactor) + densityBonus);
     for (let i = 0; i < count; i += 1) {
       this.spawnMonster(Phaser.Utils.Array.GetRandom(this.unlockedMonsterTypes(scale)), scale);
     }
@@ -395,15 +419,15 @@ class GameScene extends Phaser.Scene {
   }
 
   enemyHealthScale() {
-    return hardModeScale("health", this.hardMode);
+    return hardModeScale("health", this.hardMode) * this.tuning.enemyHealthMultiplier;
   }
 
   enemyDamageScale() {
-    return hardModeScale("damage", this.hardMode);
+    return hardModeScale("damage", this.hardMode) * this.tuning.enemyDamageMultiplier;
   }
 
   enemySpeedScale() {
-    return hardModeScale("speed", this.hardMode);
+    return hardModeScale("speed", this.hardMode) * this.tuning.enemySpeedMultiplier;
   }
 
   spawnOnslaught() {
@@ -423,7 +447,7 @@ class GameScene extends Phaser.Scene {
   }
 
   spawnMonster(type, scale = 1, x, y) {
-    const stat = MONSTER_STATS[type];
+    const stat = MONSTER_VISUALS[type];
     const side = Phaser.Math.Between(0, 3);
     const position = x === undefined
       ? side === 0 ? { x: ARENA.left + 12, y: Phaser.Math.Between(ARENA.top, ARENA.bottom) }
@@ -435,7 +459,7 @@ class GameScene extends Phaser.Scene {
   }
 
   createMonster(type, scale, position) {
-    const stat = MONSTER_STATS[type];
+    const stat = MONSTER_VISUALS[type];
     const sprite = this.add.sprite(position.x, position.y, type).setDepth(3);
     const statScale = this.enemyHealthScale();
     const damageScale = this.enemyDamageScale();
@@ -445,8 +469,8 @@ class GameScene extends Phaser.Scene {
       ? 1 + Math.min(0.8, scale * 0.08)
       : 1 + Math.min(0.4, Math.max(0, scale - 2) * 0.05);
     this.monsters.push({
-      type, sprite, health: stat.health * endlessScale, maxHealth: stat.health * endlessScale,
-      speed: stat.speed * speedScale * movementScale, damage: stat.damage * (1 + scale * 0.05) * damageScale,
+      type, sprite, health: this.tuning[`${type}Health`] * endlessScale, maxHealth: this.tuning[`${type}Health`] * endlessScale,
+      speed: this.tuning[`${type}Speed`] * speedScale * movementScale, damage: this.tuning[`${type}Damage`] * (1 + scale * 0.05) * damageScale,
       size: stat.size, scale, shotAt: this.time.now + Phaser.Math.Between(400, 1200),
       orbitDirection: Phaser.Math.Between(0, 1) ? 1 : -1,
       movementUntil: this.time.now + Phaser.Math.Between(350, 850),
@@ -455,7 +479,7 @@ class GameScene extends Phaser.Scene {
   }
 
   showSpawnIndicator(type, position, size, onComplete) {
-    const stat = type === "boss" ? { color: 0x8e3f71, size } : MONSTER_STATS[type];
+    const stat = type === "boss" ? { color: 0x8e3f71, size } : MONSTER_VISUALS[type];
     const marker = this.add.sprite(position.x, position.y, type).setDepth(2).setAlpha(0.32).setScale(1.45);
     const ring = this.add.circle(position.x, position.y, size + 11, stat.color, 0.1)
       .setStrokeStyle(2, stat.color, 0.85)
@@ -483,8 +507,8 @@ class GameScene extends Phaser.Scene {
     this.showSpawnIndicator("boss", position, 34, () => {
       const sprite = this.add.sprite(position.x, position.y, "boss").setDepth(3);
       const boss = {
-        type: "boss", sprite, health: 1500 * this.enemyHealthScale(), maxHealth: 1500 * this.enemyHealthScale(),
-        speed: 50 * this.enemySpeedScale(), size: 34, damage: 23 * this.enemyDamageScale(),
+        type: "boss", sprite, health: this.tuning.bossHealth * this.enemyHealthScale(), maxHealth: this.tuning.bossHealth * this.enemyHealthScale(),
+        speed: this.tuning.bossSpeed * this.enemySpeedScale(), size: 34, damage: this.tuning.bossDamage * this.enemyDamageScale(),
         phase: 1, shotAt: this.time.now + 1000, summonAt: this.time.now + 3200, dead: false,
       };
       this.monsters.push(boss);
@@ -511,12 +535,12 @@ class GameScene extends Phaser.Scene {
     );
     if (move.lengthSq() > 0) this.player.dashDirection = move.normalize().clone();
     if (Phaser.Input.Keyboard.JustDown(this.wasd.SHIFT) && time >= this.player.dashReadyAt) {
-      this.player.dashUntil = time + 175;
-      this.player.dashReadyAt = time + 1000;
+      this.player.dashUntil = time + this.tuning.dashDuration;
+      this.player.dashReadyAt = time + this.tuning.dashCooldown;
       this.player.invulnerableUntil = this.player.dashUntil;
       this.game.sfx.play(520, 0.08, "square", 0.06);
     }
-    const speed = time < this.player.dashUntil ? 710 : 250;
+    const speed = time < this.player.dashUntil ? this.tuning.dashSpeed : this.tuning.playerSpeed;
     const direction = time < this.player.dashUntil ? this.player.dashDirection : move.normalize();
     this.player.x = Phaser.Math.Clamp(this.player.x + direction.x * speed * delta / 1000, ARENA.left + 13, ARENA.right - 13);
     this.player.y = Phaser.Math.Clamp(this.player.y + direction.y * speed * delta / 1000, ARENA.top + 13, ARENA.bottom - 13);
@@ -524,18 +548,18 @@ class GameScene extends Phaser.Scene {
   }
 
   updateBlaster(time) {
-    if (time - this.lastShotAt < Math.max(90, 300 - this.modifiers.rate * 19)) return;
+    if (time - this.lastShotAt < Math.max(this.tuning.blasterMinimumInterval, this.tuning.blasterInterval - this.modifiers.rate * this.tuning.fireRateUpgrade)) return;
     this.lastShotAt = time;
     const pointer = this.input.activePointer;
     const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, pointer.worldX, pointer.worldY);
     const count = 1 + this.modifiers.count;
-    const spread = Phaser.Math.DegToRad(Math.min(44, Math.max(0, count - 1) * 7));
+    const spread = Phaser.Math.DegToRad(Math.min(44, Math.max(0, count - 1) * this.tuning.spreadPerProjectile));
     for (let i = 0; i < count; i += 1) {
       const angle = count === 1 ? baseAngle : baseAngle - spread / 2 + spread * (i / (count - 1));
       const sprite = this.add.sprite(this.player.x, this.player.y, "bullet").setDepth(2);
       this.projectiles.push({
-        sprite, vx: Math.cos(angle) * (530 + this.modifiers.speed * 48), vy: Math.sin(angle) * (530 + this.modifiers.speed * 48),
-        damage: 14 + this.modifiers.damage * 6, pierce: this.modifiers.pierce, hit: new Set(),
+        sprite, vx: Math.cos(angle) * (this.tuning.projectileSpeed + this.modifiers.speed * this.tuning.projectileSpeedUpgrade), vy: Math.sin(angle) * (this.tuning.projectileSpeed + this.modifiers.speed * this.tuning.projectileSpeedUpgrade),
+        damage: this.tuning.projectileDamage + this.modifiers.damage * this.tuning.projectileDamageUpgrade, pierce: this.modifiers.pierce, hit: new Set(),
       });
     }
     this.game.sfx.play(650 + this.modifiers.rate * 8, 0.035, "square", 0.018);
@@ -733,13 +757,13 @@ class GameScene extends Phaser.Scene {
     this.updateBossMovement(boss, time, delta);
     if (time >= boss.shotAt) {
       const shots = this.scaledEnemyCount(boss.phase + 2);
-      for (let i = 0; i < shots; i += 1) this.fireEnemyProjectile(boss, (220 + boss.phase * 35) * 1.25, (i - (shots - 1) / 2) * 0.16);
-      if (boss.phase >= 2) this.fireRadial(boss, this.scaledEnemyCount(boss.phase === 3 ? 12 : 8), 190 * 1.25);
-      boss.shotAt = time + 1450 - boss.phase * 180;
+      for (let i = 0; i < shots; i += 1) this.fireEnemyProjectile(boss, this.tuning.bossProjectileSpeed + boss.phase * 35, (i - (shots - 1) / 2) * 0.16);
+      if (boss.phase >= 2) this.fireRadial(boss, this.scaledEnemyCount(boss.phase === 3 ? 12 : 8), this.tuning.bossProjectileSpeed * 0.7);
+      boss.shotAt = time + this.tuning.bossFireInterval - boss.phase * 180;
     }
     if (time >= boss.summonAt) {
       for (let i = 0; i < this.scaledEnemyCount(boss.phase); i += 1) this.spawnMonster("chaser", 8 + boss.phase, boss.sprite.x + Phaser.Math.Between(-70, 70), boss.sprite.y + 42);
-      boss.summonAt = time + 4300 - boss.phase * 300;
+      boss.summonAt = time + this.tuning.bossSummonInterval - boss.phase * 300;
     }
   }
 
@@ -802,7 +826,7 @@ class GameScene extends Phaser.Scene {
     const progression = this.isEndless
       ? 1 + Math.min(0.7, monster.scale * 0.06)
       : 1 + Math.max(0, monster.scale - 2) * 0.03;
-    return 300 * progression;
+    return this.tuning.rangedProjectileSpeed * progression;
   }
 
   fireRotatingRing(source, count, speed) {
@@ -917,7 +941,7 @@ class GameScene extends Phaser.Scene {
     }
     if (this.wave > 0 && this.wave < this.wavesInRoom) {
       if (!this.nextWaveAt) {
-        this.nextWaveAt = time + 900;
+        this.nextWaveAt = time + this.tuning.waveDelay;
         this.showMessage("NEXT WAVE INCOMING", "#e3b0eb");
       } else if (time >= this.nextWaveAt) {
         this.spawnWave();
@@ -939,10 +963,10 @@ class GameScene extends Phaser.Scene {
       fontFamily: "Courier New", fontSize: "27px", fontStyle: "bold", color: "#f8c555",
     }).setOrigin(0.5).setDepth(31);
     const choices = [
-      ["damage", "DAMAGE", "+6 projectile damage"],
-      ["rate", "FIRE RATE", "-19ms between shots"],
+      ["damage", "DAMAGE", `+${this.tuning.projectileDamageUpgrade} projectile damage`],
+      ["rate", "FIRE RATE", `-${this.tuning.fireRateUpgrade}ms between shots`],
       ["count", "PROJECTILE COUNT", "+1 projectile per shot"],
-      ["speed", "PROJECTILE SPEED", "+48 projectile speed"],
+      ["speed", "PROJECTILE SPEED", `+${this.tuning.projectileSpeedUpgrade} projectile speed`],
       ["pierce", "PIERCE", "+1 monster pierced"],
     ];
     const buttons = [];
@@ -1051,6 +1075,11 @@ new Phaser.Game({
   callbacks: {
     postBoot: (game) => {
       game.sfx = new Sfx();
+      game.tuning = loadTuning();
+      game.devControls = createDeveloperControls(game.tuning, () => {
+        game.scene.getScene("game")?.togglePaused();
+      });
+      game.devControls.setGameActive(false);
     },
   },
 });
