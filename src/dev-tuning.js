@@ -1,4 +1,5 @@
 const STORAGE_KEY = "monster-blaster-dev-tuning";
+const LIMITS_STORAGE_KEY = "monster-blaster-dev-slider-limits";
 
 export const DEFAULT_TUNING = Object.freeze({
   playerHealth: 100, playerSpeed: 250, dashSpeed: 710, dashDuration: 175, dashCooldown: 1000,
@@ -56,6 +57,13 @@ const SLIDER_GROUPS = [
   ] },
 ];
 
+export const DEFAULT_SLIDER_LIMITS = Object.freeze(
+  Object.fromEntries(SLIDER_GROUPS.flatMap(({ sliders }) => sliders.map(({ key, max }) => [key, max]))),
+);
+const SLIDER_MINIMUMS = Object.freeze(
+  Object.fromEntries(SLIDER_GROUPS.flatMap(({ sliders }) => sliders.map(({ key, min }) => [key, min]))),
+);
+
 export function loadTuning() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
   return Object.fromEntries(Object.entries(DEFAULT_TUNING).map(([key, value]) => {
@@ -64,7 +72,15 @@ export function loadTuning() {
   }));
 }
 
-export function createDeveloperControls(tuning, togglePause) {
+export function loadSliderLimits() {
+  const saved = JSON.parse(localStorage.getItem(LIMITS_STORAGE_KEY) || "{}");
+  return Object.fromEntries(Object.entries(DEFAULT_SLIDER_LIMITS).map(([key, value]) => {
+    const savedValue = Number(saved[key]);
+    return [key, Number.isFinite(savedValue) && savedValue >= SLIDER_MINIMUMS[key] ? savedValue : value];
+  }));
+}
+
+export function createDeveloperControls(tuning, togglePause, sliderLimits = loadSliderLimits()) {
   const panel = document.querySelector("#dev-panel");
   const pauseButton = document.querySelector("#pause-button");
   const saveButton = document.querySelector("#save-tuning");
@@ -86,18 +102,42 @@ export function createDeveloperControls(tuning, togglePause) {
       const input = document.createElement("input");
       input.type = "range";
       input.min = min;
-      input.max = max;
+      input.max = sliderLimits[key];
       input.step = step;
       input.value = tuning[key];
       input.dataset.key = key;
+      const limitLabel = document.createElement("span");
+      limitLabel.className = "slider-limit-label";
+      limitLabel.textContent = "max";
+      const limitInput = document.createElement("input");
+      limitInput.className = "slider-limit";
+      limitInput.type = "number";
+      limitInput.inputMode = "decimal";
+      limitInput.min = min;
+      limitInput.step = step;
+      limitInput.value = sliderLimits[key];
+      limitInput.dataset.key = key;
       const update = () => {
         tuning[key] = Number(input.value);
         value.value = input.value;
         value.textContent = input.value;
       };
+      limitInput.addEventListener("change", () => {
+        const nextLimit = Number(limitInput.value);
+        if (!Number.isFinite(nextLimit) || nextLimit < min) {
+          limitInput.value = input.max;
+          return;
+        }
+        sliderLimits[key] = nextLimit;
+        input.max = nextLimit;
+        if (Number(input.value) > nextLimit) {
+          input.value = nextLimit;
+          update();
+        }
+      });
       input.addEventListener("input", update);
       update();
-      row.append(name, value, input);
+      row.append(name, value, limitLabel, limitInput, input);
       group.append(row);
     });
     panel.append(group);
@@ -106,15 +146,22 @@ export function createDeveloperControls(tuning, togglePause) {
   pauseButton.addEventListener("click", togglePause);
   saveButton.addEventListener("click", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tuning));
+    localStorage.setItem(LIMITS_STORAGE_KEY, JSON.stringify(sliderLimits));
     status.textContent = "Saved";
   });
   resetButton.addEventListener("click", () => {
     Object.assign(tuning, DEFAULT_TUNING);
-    panel.querySelectorAll("input").forEach((input) => {
+    Object.assign(sliderLimits, DEFAULT_SLIDER_LIMITS);
+    panel.querySelectorAll('input[type="range"]').forEach((input) => {
       input.value = tuning[input.dataset.key];
+      input.max = sliderLimits[input.dataset.key];
       input.dispatchEvent(new Event("input"));
     });
+    panel.querySelectorAll(".slider-limit").forEach((input) => {
+      input.value = sliderLimits[input.dataset.key];
+    });
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LIMITS_STORAGE_KEY);
     status.textContent = "Defaults restored";
   });
 
