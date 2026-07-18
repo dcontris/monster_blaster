@@ -60,6 +60,9 @@ const SLIDER_GROUPS = [
 export const DEFAULT_SLIDER_LIMITS = Object.freeze(
   Object.fromEntries(SLIDER_GROUPS.flatMap(({ sliders }) => sliders.map(({ key, max }) => [key, max]))),
 );
+const SLIDER_MINIMUMS = Object.freeze(
+  Object.fromEntries(SLIDER_GROUPS.flatMap(({ sliders }) => sliders.map(({ key, min }) => [key, min]))),
+);
 
 export function loadTuning() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -73,7 +76,7 @@ export function loadSliderLimits() {
   const saved = JSON.parse(localStorage.getItem(LIMITS_STORAGE_KEY) || "{}");
   return Object.fromEntries(Object.entries(DEFAULT_SLIDER_LIMITS).map(([key, value]) => {
     const savedValue = Number(saved[key]);
-    return [key, Number.isFinite(savedValue) && savedValue >= value ? savedValue : value];
+    return [key, Number.isFinite(savedValue) && savedValue >= SLIDER_MINIMUMS[key] ? savedValue : value];
   }));
 }
 
