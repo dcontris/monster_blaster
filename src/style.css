@@ -89,6 +89,20 @@ main {
   color: #f8c555;
 }
 
+.slider-limit-label {
+  color: #b8a5d6;
+  font-size: 11px;
+  text-align: right;
+}
+
+.tuning-slider .slider-limit {
+  width: 75px;
+  color: #f8efcf;
+  font: 11px "Courier New", monospace;
+  background: #130d23;
+  border: 1px solid #593a78;
+}
+
 .tuning-actions {
   display: flex;
   gap: 6px;
