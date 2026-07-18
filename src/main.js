@@ -204,6 +204,7 @@ class GameScene extends Phaser.Scene {
       .setStrokeStyle(3, 0x7a4b88)
       .setDepth(-2);
     this.warpEvents = [];
+    this.spaceTimeGrid = null;
     this.drawFloor();
     this.player = this.add.sprite(WIDTH / 2, HEIGHT / 2, "player").setDepth(4);
     this.tuning = this.game.tuning;
